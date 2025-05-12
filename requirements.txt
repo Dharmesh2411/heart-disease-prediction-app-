@@ -11,3 +11,4 @@ pdfplumber
 pytesseract
 pdf2image
 numpy
+fpdf
