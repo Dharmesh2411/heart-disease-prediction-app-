@@ -1,180 +1,163 @@
 import streamlit as st
-import os
-import joblib
-import requests
-import tempfile
 import pandas as pd
+import pickle
+import requests
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
-import json
-import fitz  # PyMuPDF
-import datetime
+from sklearn.metrics import accuracy_score
+from io import BytesIO
+from fpdf import FPDF
 from dotenv import load_dotenv
+import os
+import fitz  # PyMuPDF for PDF parsing
+from groq import Groq
 
 load_dotenv()
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
-# ---------------------- Load models --------------------------
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+client = Groq(api_key=GROQ_API_KEY)
+
+# Repo and model filenames
+repo_id = "Dharmesh234/Diebates23"
+model_files = {
+    "Logistic Regression": "logistic_regression_model.pkl",
+    "Naive Bayes": "naive_bayes_model.pkl",
+    "SVM": "svm_model.pkl",
+    "KNN": "knn_model.pkl",
+    "Decision Tree": "decision_tree_model.pkl",
+    "Random Forest": "random_forest_model.pkl",
+    "XGBoost": "xgboost_model.pkl"
+}
+
+# Load all models from Hugging Face
 @st.cache_resource
 def load_models():
-    # Download the models from Hugging Face
-    model_names = [
-        "logistic_regression_model.pkl",
-        "naive_bayes_model.pkl",
-        "svm_model.pkl",
-        "knn_model.pkl",
-        "decision_tree_model.pkl",
-        "random_forest_model.pkl",
-        "xgboost_model.pkl"
-    ]
-    
     models = {}
-    for model_name in model_names:
-        model_path = hf_hub_download(repo_id="jaik256/heartDiseasePredictor", filename=model_name)
-        models[model_name.split(".")[0]] = joblib.load(model_path)
-    
+    for name, file in model_files.items():
+        model_path = hf_hub_download(repo_id=repo_id, filename=file, repo_type="model")
+        with open(model_path, "rb") as f:
+            models[name] = pickle.load(f)
     return models
 
 models = load_models()
 
-# ---------------------- Groq API --------------------------
-def extract_features_from_report(report_text):
-    prompt = f"""Extract the following values as numbers from the medical report below:
-    - Pregnancies
-    - Glucose
-    - BloodPressure
-    - SkinThickness
-    - Insulin
-    - BMI
-    - DiabetesPedigreeFunction
-    - Age
+# App Interface
+st.title("💖 Heart Disease Predictor")
+st.write("Enter the following details to predict heart disease using multiple models.")
 
-    Report:
-    {report_text}
+# Input Fields
+with st.form("input_form"):
+    name = st.text_input("Patient Name", max_chars=50)
+    age = st.number_input("Age", min_value=1, max_value=120)
+    sex = st.selectbox("Sex", [0, 1])  # 0: Female, 1: Male
+    cp = st.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
+    trestbps = st.number_input("Resting Blood Pressure (trestbps)", min_value=80, max_value=200)
+    chol = st.number_input("Serum Cholesterol (chol)", min_value=100, max_value=600)
+    fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl (fbs)", [0, 1])
+    restecg = st.selectbox("Resting ECG Results", [0, 1, 2])
+    thalach = st.number_input("Max Heart Rate Achieved (thalach)", min_value=60, max_value=250)
+    exang = st.selectbox("Exercise Induced Angina (exang)", [0, 1])
+    oldpeak = st.number_input("Oldpeak", min_value=0.0, max_value=10.0)
+    slope = st.selectbox("Slope of Peak Exercise ST Segment", [0, 1, 2])
+    ca = st.selectbox("Number of Major Vessels Colored by Fluoroscopy (ca)", [0, 1, 2, 3, 4])
+    thal = st.selectbox("Thalassemia (thal)", [0, 1, 2, 3])
+    submit = st.form_submit_button("Predict")
 
-    Instructions:
-    - Return a valid JSON object with those keys.
-    - All values must be numbers or null.
-    - No text outside JSON.
-    """
+if submit:
+    input_data = [[age, sex, cp, trestbps, chol, fbs, restecg,
+                   thalach, exang, oldpeak, slope, ca, thal]]
+    
+    results = {}
+    for model_name, model in models.items():
+        prediction = model.predict(input_data)[0]
+        results[model_name] = prediction
 
-    headers = {
-        "Authorization": f"Bearer {GROQ_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    st.subheader(f"Prediction Results for {name}")
+    for model, result in results.items():
+        status = "✅ Likely Healthy" if result == 0 else "⚠️ Risk of Heart Disease"
+        st.write(f"**{model}**: {status}")
 
-    data = {
-        "model": "llama3-8b-8192",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2
-    }
+    # Graph of model predictions
+    st.subheader("Model Comparison")
+    labels = list(results.keys())
+    values = list(results.values())
+
+    fig, ax = plt.subplots()
+    ax.barh(labels, values, color=['green' if v == 0 else 'red' for v in values])
+    ax.set_xlabel("Prediction (0=Healthy, 1=Disease)")
+    st.pyplot(fig)
+
+    # Generate report
+    report_df = pd.DataFrame({
+        "Name": [name],
+        "Age": [age],
+        "Sex": [sex],
+        "Chest Pain": [cp],
+        "BP": [trestbps],
+        "Cholesterol": [chol],
+        "FBS": [fbs],
+        "Rest ECG": [restecg],
+        "Thalach": [thalach],
+        "Exang": [exang],
+        "Oldpeak": [oldpeak],
+        "Slope": [slope],
+        "CA": [ca],
+        "Thal": [thal],
+        **results
+    })
+
+    def convert_df(df):
+        return df.to_csv(index=False).encode("utf-8")
+
+    st.download_button("📄 Download Report", convert_df(report_df), file_name=f"{name}_heart_report.csv")
+
+# Upload Report and Predict
+st.subheader("📤 Upload Existing Report (CSV or PDF)")
+uploaded_file = st.file_uploader("Upload report", type=["csv", "pdf"])
+
+if uploaded_file:
+    def extract_pdf_text(pdf_file):
+        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
+        text = " ".join([page.get_text() for page in doc])
+        return text
 
     try:
-        response = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, data=json.dumps(data))
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
-        extracted_data = json.loads(content)
-
-        required_keys = ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]
-        for key in required_keys:
-            if key not in extracted_data or not isinstance(extracted_data[key], (int, float, type(None))):
-                st.warning(f"Missing or invalid value for '{key}'")
-        return extracted_data
-    except Exception as e:
-        st.error(f"Groq extraction error: {e}")
-        return None
-
-# ---------------------- PDF Report Generator --------------------------
-def generate_pdf_with_fitz(patient_name, input_data, prediction, probability):
-    pdf_doc = fitz.open()
-    page = pdf_doc.new_page()
-
-    y = 50
-    page.insert_text((50, y), "🩺 Diabetes Prediction Report", fontsize=16)
-    y += 30
-    page.insert_text((50, y), f"Patient: {patient_name}")
-    y += 20
-    page.insert_text((50, y), f"Date: {datetime.date.today().strftime('%Y-%m-%d')}")
-    y += 30
-    page.insert_text((50, y), "Input Data:", fontsize=12)
-    y += 20
-    for k, v in input_data.items():
-        page.insert_text((60, y), f"{k}: {v}")
-        y += 18
-    y += 20
-    result = "Diabetic" if prediction == 1 else "Non-Diabetic"
-    page.insert_text((50, y), f"Prediction: {result} ({probability:.2f}%)", fontsize=12)
-
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        pdf_doc.save(tmp.name)
-        return tmp.name
-
-# ---------------------- Streamlit UI --------------------------
-st.set_page_config(page_title="Diabetes Predictor", page_icon="🩺")
-st.title("🩺 Diabetes Prediction App")
-st.write("Upload a medical report or enter health details to get your diabetes risk.")
-
-patient_name = st.text_input("Patient Name")
-
-input_method = st.radio("Select Input Method", ["Enter Manually", "Upload Report"])
-
-input_data = {}
-
-# Upload & Extract
-if input_method == "Upload Report":
-    file = st.file_uploader("Upload TXT or PDF file", type=["txt", "pdf"])
-    if file:
-        if file.name.endswith(".txt"):
-            report_text = file.read().decode()
+        if uploaded_file.name.endswith(".csv"):
+            user_data = pd.read_csv(uploaded_file).iloc[0].to_dict()
         else:
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-                tmp.write(file.read())
-                path = tmp.name
-            doc = fitz.open(path)
-            report_text = "\n".join([page.get_text() for page in doc])
-            doc.close()
+            text = extract_pdf_text(uploaded_file)
+            prompt = f"""
+            Extract structured data from this patient report for heart disease prediction.
+            Required fields: age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal.
+            Text: {text}
+            Return JSON.
+            """
+            completion = client.chat.completions.create(
+                model="llama3-8b-8192",
+                messages=[{"role": "user", "content": prompt}]
+            )
+            user_data = eval(completion.choices[0].message.content)
 
-        st.text_area("Extracted Report", report_text, height=200)
-        st.info("🔍 Extracting features using Groq API...")
-        input_data = extract_features_from_report(report_text)
+        missing_fields = [key for key in ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
+                                          "thalach", "exang", "oldpeak", "slope", "ca", "thal"]
+                          if key not in user_data]
 
-        # Fill missing fields
-        for key in ["Pregnancies", "Glucose", "BloodPressure", "SkinThickness", "Insulin", "BMI", "DiabetesPedigreeFunction", "Age"]:
-            if input_data.get(key) is None:
-                default = 0.0 if key != "Age" else 30
-                input_data[key] = st.number_input(f"{key} (Enter manually)", value=default)
+        for field in missing_fields:
+            user_data[field] = st.number_input(f"Missing value for {field}:", key=field)
 
-else:
-    input_data = {
-        "Pregnancies": st.number_input("Pregnancies", 0, 20, 2),
-        "Glucose": st.number_input("Glucose (mg/dL)", 0.0, 300.0, 120.0),
-        "BloodPressure": st.number_input("Blood Pressure (mmHg)", 0.0, 200.0, 70.0),
-        "SkinThickness": st.number_input("Skin Thickness (mm)", 0.0, 100.0, 20.0),
-        "Insulin": st.number_input("Insulin (mu U/ml)", 0.0, 1000.0, 80.0),
-        "BMI": st.number_input("BMI", 0.0, 70.0, 25.0),
-        "DiabetesPedigreeFunction": st.number_input("Diabetes Pedigree Function", 0.0, 3.0, 0.5),
-        "Age": st.number_input("Age", 0, 120, 30)
-    }
+        input_data = [[user_data['age'], user_data['sex'], user_data['cp'], user_data['trestbps'],
+                       user_data['chol'], user_data['fbs'], user_data['restecg'], user_data['thalach'],
+                       user_data['exang'], user_data['oldpeak'], user_data['slope'],
+                       user_data['ca'], user_data['thal']]]
 
-# Model Selection
-model_choice = st.selectbox("Select Model", ["Logistic Regression", "Naive Bayes", "SVM", "KNN", "Decision Tree", "Random Forest", "XGBoost"])
+        results = {}
+        for model_name, model in models.items():
+            prediction = model.predict(input_data)[0]
+            results[model_name] = prediction
 
-# ---------------------- Prediction --------------------------
-if st.button("Predict"):
-    if not patient_name:
-        st.warning("Please enter patient name.")
-        st.stop()
+        st.success("✅ Predictions based on uploaded report:")
+        for model, result in results.items():
+            st.write(f"**{model}**: {'Healthy' if result == 0 else 'At Risk'}")
 
-    model = models[model_choice.replace(" ", "_").lower()]
-    features_df = pd.DataFrame([input_data])
-    prediction = model.predict(features_df)[0]
-    probability = model.predict_proba(features_df)[0][1] * 100
-
-    result_text = "🟥 Diabetic" if prediction == 1 else "🟩 Non-Diabetic"
-    st.subheader(f"Prediction Result: {result_text}")
-    st.write(f"Probability of being diabetic: **{probability:.2f}%**")
-
-    # PDF Report Download
-    pdf_path = generate_pdf_with_fitz(patient_name, input_data, prediction, probability)
-    with open(pdf_path, "rb") as f:
-        st.download_button("📄 Download PDF Report", f, file_name="diabetes_report.pdf")
+    except Exception as e:
+        st.error(f"Error processing report: {e}")
