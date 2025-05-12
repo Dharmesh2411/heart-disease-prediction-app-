@@ -1,0 +1,13 @@
+streamlit
+pandas
+cloudpickle
+requests
+python-dotenv
+huggingface_hub
+PyMuPDF
+matplotlib
+scikit-learn
+pdfplumber
+pytesseract
+pdf2image
+numpy
