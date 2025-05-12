@@ -1,123 +1,121 @@
 import streamlit as st
-import pickle
+import joblib
 import pandas as pd
 import matplotlib.pyplot as plt
-from huggingface_hub import hf_hub_download
-import base64
-import tempfile
-import json
+import requests
 from io import BytesIO
+from datetime import datetime
+import base64
+import fitz  # PyMuPDF for report extraction
+from groq import Groq  # Assuming Groq API is set
+import os
 
-# Load models
+# Set page
+st.set_page_config(page_title="Heart Disease Predictor", layout="wide")
+st.title("🫀 Heart Disease Predictor App")
+
+# Load models from Hugging Face
 @st.cache_data
 def load_models():
-    repo_id = "Dharmesh234/Diebates23"
-    model_files = {
-        "Logistic Regression": "logistic_regression_model.pkl",
-        "Naive Bayes": "naive_bayes_model.pkl",
-        "SVM": "svm_model.pkl",
-        "KNN": "knn_model.pkl",
-        "Decision Tree": "decision_tree_model.pkl",
-        "Random Forest": "random_forest_model.pkl",
-        "XGBoost": "xgboost_model.pkl"
-    }
-
     models = {}
-    for name, filename in model_files.items():
-        model_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="model")
-        with open(model_path, "rb") as f:
-            models[name] = pickle.load(f)
+    model_names = [
+        "logistic_regression_model.joblib",
+        "naive_bayes_model.joblib",
+        "svm_model.joblib",
+        "knn_model.joblib",
+        "decision_tree_model.joblib",
+        "random_forest_model.joblib",
+        "xgboost_model.joblib"
+    ]
+    base_url = "https://huggingface.co/Dharmesh234/Diebates23/resolve/main/"
+
+    for name in model_names:
+        url = base_url + name
+        r = requests.get(url)
+        r.raise_for_status()
+        models[name.replace("_model.joblib", "")] = joblib.load(BytesIO(r.content))
+
     return models
 
 models = load_models()
 
-# Input form
-def user_input():
-    st.header("Heart Disease Predictor")
-    name = st.text_input("Full Name", "John Doe")
+# Input features
+st.sidebar.header("User Input")
+name = st.sidebar.text_input("Name", "John Doe")
 
-    age = st.slider("Age", 20, 80, 50)
-    sex = st.selectbox("Sex", ["Male", "Female"])
-    cp = st.selectbox("Chest Pain Type (0-3)", [0, 1, 2, 3])
-    trestbps = st.slider("Resting Blood Pressure", 80, 200, 120)
-    chol = st.slider("Serum Cholesterol (mg/dl)", 100, 400, 200)
-    fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", [0, 1])
-    restecg = st.selectbox("Resting ECG results (0-2)", [0, 1, 2])
-    thalach = st.slider("Max Heart Rate Achieved", 70, 210, 150)
-    exang = st.selectbox("Exercise Induced Angina", [0, 1])
-    oldpeak = st.slider("ST depression", 0.0, 6.0, 1.0)
-    slope = st.selectbox("Slope of the peak exercise ST segment", [0, 1, 2])
-    ca = st.selectbox("Number of major vessels (0-4)", [0, 1, 2, 3, 4])
-    thal = st.selectbox("Thalassemia (0 = normal; 1 = fixed defect; 2 = reversible defect)", [0, 1, 2])
+features = {
+    'age': st.sidebar.number_input("Age", 1, 120, 50),
+    'sex': st.sidebar.selectbox("Sex", [0, 1]),
+    'cp': st.sidebar.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3]),
+    'trestbps': st.sidebar.slider("Resting Blood Pressure (trestbps)", 90, 200, 120),
+    'chol': st.sidebar.slider("Cholesterol (chol)", 100, 600, 240),
+    'fbs': st.sidebar.selectbox("Fasting Blood Sugar > 120 mg/dl", [0, 1]),
+    'restecg': st.sidebar.selectbox("Rest ECG", [0, 1, 2]),
+    'thalach': st.sidebar.slider("Max Heart Rate (thalach)", 60, 220, 150),
+    'exang': st.sidebar.selectbox("Exercise Induced Angina", [0, 1]),
+    'oldpeak': st.sidebar.slider("Oldpeak", 0.0, 6.2, 1.0),
+    'slope': st.sidebar.selectbox("Slope", [0, 1, 2]),
+    'ca': st.sidebar.selectbox("Number of major vessels (0-3)", [0, 1, 2, 3]),
+    'thal': st.sidebar.selectbox("Thalassemia", [0, 1, 2, 3])
+}
 
-    input_data = {
-        "name": name,
-        "features": [
-            age, 1 if sex == "Male" else 0, cp, trestbps, chol,
-            fbs, restecg, thalach, exang, oldpeak, slope, ca, thal
-        ]
-    }
-    return input_data
+input_df = pd.DataFrame([features])
 
-# Predict function
-def predict_all(models, input_features):
+# Prediction
+if st.button("Predict Heart Disease"):
+    st.subheader(f"Prediction Results for {name}")
     results = {}
-    for name, model in models.items():
-        pred = model.predict([input_features])[0]
-        prob = model.predict_proba([input_features])[0][1] if hasattr(model, "predict_proba") else 0.5
-        results[name] = {"prediction": pred, "probability": prob}
-    return results
+    for model_name, model in models.items():
+        try:
+            results[model_name] = model.predict_proba(input_df)[0][1] * 100  # Probability of disease
+        except:
+            results[model_name] = model.predict(input_df)[0] * 100  # Fallback
 
-# Generate download report
-def generate_report(input_data, predictions):
-    report = {
-        "name": input_data["name"],
-        "input_features": input_data["features"],
-        "predictions": predictions
-    }
-    json_str = json.dumps(report, indent=4)
-    b64 = base64.b64encode(json_str.encode()).decode()
-    href = f'<a href="data:file/json;base64,{b64}" download="heart_disease_report.json">📄 Download Report (JSON)</a>'
-    st.markdown(href, unsafe_allow_html=True)
+    # Show results table
+    result_df = pd.DataFrame(list(results.items()), columns=["Model", "Disease Probability (%)"])
+    st.dataframe(result_df)
 
-# Upload report and auto-complete
-def upload_report():
-    uploaded = st.file_uploader("📤 Upload Report File (JSON)", type="json")
-    if uploaded:
-        data = json.load(uploaded)
-        name = data.get("name", "")
-        features = data.get("input_features", [])
-        if not name or len(features) != 13:
-            st.warning("⚠️ Incomplete report data. Please complete manually.")
-            return user_input()
-        return {"name": name, "features": features}
-    return None
-
-# Main app
-st.title("🫀 AI-Based Heart Disease Prediction App")
-option = st.radio("Choose Input Method", ["Manual Entry", "Upload Report"])
-
-if option == "Manual Entry":
-    input_data = user_input()
-elif option == "Upload Report":
-    input_data = upload_report()
-
-if input_data and st.button("🔍 Predict Heart Disease"):
-    results = predict_all(models, input_data["features"])
-
-    st.subheader(f"Prediction Results for {input_data['name']}")
-    for model, result in results.items():
-        st.write(f"**{model}**: {'💔 Disease Detected' if result['prediction'] == 1 else '❤️ No Disease'} (Chance: {result['probability']*100:.2f}%)")
-
-    # Accuracy Graph
-    st.subheader("📊 Model Probabilities Comparison")
+    # Plot results
+    st.subheader("Model-wise Prediction Chart")
     fig, ax = plt.subplots()
-    model_names = list(results.keys())
-    probs = [results[m]['probability'] for m in model_names]
-    ax.barh(model_names, probs, color='skyblue')
-    ax.set_xlabel('Probability of Heart Disease')
-    ax.set_xlim(0, 1)
+    ax.barh(result_df['Model'], result_df['Disease Probability (%)'], color='coral')
+    plt.xlabel("Probability (%)")
     st.pyplot(fig)
 
-    # Report Download
-    generate_report(input_data, results)
+    # Downloadable report
+    report = f"Report for {name}\nDate: {datetime.now()}\n\nUser Input:\n{input_df.to_string(index=False)}\n\nModel Results:\n{result_df.to_string(index=False)}"
+    b64 = base64.b64encode(report.encode()).decode()
+    href = f'<a href="data:file/txt;base64,{b64}" download="{name}_heart_disease_report.txt">📄 Download Report</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
+# Upload Report and Extract
+st.subheader("📤 Upload Existing Report")
+uploaded_file = st.file_uploader("Upload Previous Report (PDF)", type=["pdf"])
+if uploaded_file:
+    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
+    text = "".join([page.get_text() for page in doc])
+
+    # Send to Groq for data extraction
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        st.error("GROQ_API_KEY not set in environment variables.")
+    else:
+        client = Groq(api_key=groq_api_key)
+        prompt = f"""
+        Extract the following from this report text:
+        - Name
+        - All 13 features required for heart disease prediction: age, sex, cp, trestbps, chol, fbs, restecg,
+          thalach, exang, oldpeak, slope, ca, thal.
+        If any field is missing, say "Missing".
+
+        Report Text:
+        {text}
+        """
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        answer = response.choices[0].message.content
+        st.markdown("### Extracted Data from Report")
+        st.text(answer)
+        # Optionally, parse and allow user to edit missing fields here
