@@ -1,163 +1,123 @@
 import streamlit as st
-import pandas as pd
 import pickle
-import requests
+import pandas as pd
 import matplotlib.pyplot as plt
 from huggingface_hub import hf_hub_download
-from sklearn.metrics import accuracy_score
+import base64
+import tempfile
+import json
 from io import BytesIO
-from fpdf import FPDF
-from dotenv import load_dotenv
-import os
-import fitz  # PyMuPDF for PDF parsing
-from groq import Groq
 
-load_dotenv()
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-client = Groq(api_key=GROQ_API_KEY)
-
-# Repo and model filenames
-repo_id = "Dharmesh234/Diebates23"
-model_files = {
-    "Logistic Regression": "logistic_regression_model.pkl",
-    "Naive Bayes": "naive_bayes_model.pkl",
-    "SVM": "svm_model.pkl",
-    "KNN": "knn_model.pkl",
-    "Decision Tree": "decision_tree_model.pkl",
-    "Random Forest": "random_forest_model.pkl",
-    "XGBoost": "xgboost_model.pkl"
-}
-
-# Load all models from Hugging Face
-@st.cache_resource
+# Load models
+@st.cache_data
 def load_models():
+    repo_id = "Dharmesh234/Diebates23"
+    model_files = {
+        "Logistic Regression": "logistic_regression_model.pkl",
+        "Naive Bayes": "naive_bayes_model.pkl",
+        "SVM": "svm_model.pkl",
+        "KNN": "knn_model.pkl",
+        "Decision Tree": "decision_tree_model.pkl",
+        "Random Forest": "random_forest_model.pkl",
+        "XGBoost": "xgboost_model.pkl"
+    }
+
     models = {}
-    for name, file in model_files.items():
-        model_path = hf_hub_download(repo_id=repo_id, filename=file, repo_type="model")
+    for name, filename in model_files.items():
+        model_path = hf_hub_download(repo_id=repo_id, filename=filename, repo_type="model")
         with open(model_path, "rb") as f:
             models[name] = pickle.load(f)
     return models
 
 models = load_models()
 
-# App Interface
-st.title("💖 Heart Disease Predictor")
-st.write("Enter the following details to predict heart disease using multiple models.")
+# Input form
+def user_input():
+    st.header("Heart Disease Predictor")
+    name = st.text_input("Full Name", "John Doe")
 
-# Input Fields
-with st.form("input_form"):
-    name = st.text_input("Patient Name", max_chars=50)
-    age = st.number_input("Age", min_value=1, max_value=120)
-    sex = st.selectbox("Sex", [0, 1])  # 0: Female, 1: Male
-    cp = st.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
-    trestbps = st.number_input("Resting Blood Pressure (trestbps)", min_value=80, max_value=200)
-    chol = st.number_input("Serum Cholesterol (chol)", min_value=100, max_value=600)
-    fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl (fbs)", [0, 1])
-    restecg = st.selectbox("Resting ECG Results", [0, 1, 2])
-    thalach = st.number_input("Max Heart Rate Achieved (thalach)", min_value=60, max_value=250)
-    exang = st.selectbox("Exercise Induced Angina (exang)", [0, 1])
-    oldpeak = st.number_input("Oldpeak", min_value=0.0, max_value=10.0)
-    slope = st.selectbox("Slope of Peak Exercise ST Segment", [0, 1, 2])
-    ca = st.selectbox("Number of Major Vessels Colored by Fluoroscopy (ca)", [0, 1, 2, 3, 4])
-    thal = st.selectbox("Thalassemia (thal)", [0, 1, 2, 3])
-    submit = st.form_submit_button("Predict")
+    age = st.slider("Age", 20, 80, 50)
+    sex = st.selectbox("Sex", ["Male", "Female"])
+    cp = st.selectbox("Chest Pain Type (0-3)", [0, 1, 2, 3])
+    trestbps = st.slider("Resting Blood Pressure", 80, 200, 120)
+    chol = st.slider("Serum Cholesterol (mg/dl)", 100, 400, 200)
+    fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", [0, 1])
+    restecg = st.selectbox("Resting ECG results (0-2)", [0, 1, 2])
+    thalach = st.slider("Max Heart Rate Achieved", 70, 210, 150)
+    exang = st.selectbox("Exercise Induced Angina", [0, 1])
+    oldpeak = st.slider("ST depression", 0.0, 6.0, 1.0)
+    slope = st.selectbox("Slope of the peak exercise ST segment", [0, 1, 2])
+    ca = st.selectbox("Number of major vessels (0-4)", [0, 1, 2, 3, 4])
+    thal = st.selectbox("Thalassemia (0 = normal; 1 = fixed defect; 2 = reversible defect)", [0, 1, 2])
 
-if submit:
-    input_data = [[age, sex, cp, trestbps, chol, fbs, restecg,
-                   thalach, exang, oldpeak, slope, ca, thal]]
-    
+    input_data = {
+        "name": name,
+        "features": [
+            age, 1 if sex == "Male" else 0, cp, trestbps, chol,
+            fbs, restecg, thalach, exang, oldpeak, slope, ca, thal
+        ]
+    }
+    return input_data
+
+# Predict function
+def predict_all(models, input_features):
     results = {}
-    for model_name, model in models.items():
-        prediction = model.predict(input_data)[0]
-        results[model_name] = prediction
+    for name, model in models.items():
+        pred = model.predict([input_features])[0]
+        prob = model.predict_proba([input_features])[0][1] if hasattr(model, "predict_proba") else 0.5
+        results[name] = {"prediction": pred, "probability": prob}
+    return results
 
-    st.subheader(f"Prediction Results for {name}")
+# Generate download report
+def generate_report(input_data, predictions):
+    report = {
+        "name": input_data["name"],
+        "input_features": input_data["features"],
+        "predictions": predictions
+    }
+    json_str = json.dumps(report, indent=4)
+    b64 = base64.b64encode(json_str.encode()).decode()
+    href = f'<a href="data:file/json;base64,{b64}" download="heart_disease_report.json">📄 Download Report (JSON)</a>'
+    st.markdown(href, unsafe_allow_html=True)
+
+# Upload report and auto-complete
+def upload_report():
+    uploaded = st.file_uploader("📤 Upload Report File (JSON)", type="json")
+    if uploaded:
+        data = json.load(uploaded)
+        name = data.get("name", "")
+        features = data.get("input_features", [])
+        if not name or len(features) != 13:
+            st.warning("⚠️ Incomplete report data. Please complete manually.")
+            return user_input()
+        return {"name": name, "features": features}
+    return None
+
+# Main app
+st.title("🫀 AI-Based Heart Disease Prediction App")
+option = st.radio("Choose Input Method", ["Manual Entry", "Upload Report"])
+
+if option == "Manual Entry":
+    input_data = user_input()
+elif option == "Upload Report":
+    input_data = upload_report()
+
+if input_data and st.button("🔍 Predict Heart Disease"):
+    results = predict_all(models, input_data["features"])
+
+    st.subheader(f"Prediction Results for {input_data['name']}")
     for model, result in results.items():
-        status = "✅ Likely Healthy" if result == 0 else "⚠️ Risk of Heart Disease"
-        st.write(f"**{model}**: {status}")
+        st.write(f"**{model}**: {'💔 Disease Detected' if result['prediction'] == 1 else '❤️ No Disease'} (Chance: {result['probability']*100:.2f}%)")
 
-    # Graph of model predictions
-    st.subheader("Model Comparison")
-    labels = list(results.keys())
-    values = list(results.values())
-
+    # Accuracy Graph
+    st.subheader("📊 Model Probabilities Comparison")
     fig, ax = plt.subplots()
-    ax.barh(labels, values, color=['green' if v == 0 else 'red' for v in values])
-    ax.set_xlabel("Prediction (0=Healthy, 1=Disease)")
+    model_names = list(results.keys())
+    probs = [results[m]['probability'] for m in model_names]
+    ax.barh(model_names, probs, color='skyblue')
+    ax.set_xlabel('Probability of Heart Disease')
+    ax.set_xlim(0, 1)
     st.pyplot(fig)
 
-    # Generate report
-    report_df = pd.DataFrame({
-        "Name": [name],
-        "Age": [age],
-        "Sex": [sex],
-        "Chest Pain": [cp],
-        "BP": [trestbps],
-        "Cholesterol": [chol],
-        "FBS": [fbs],
-        "Rest ECG": [restecg],
-        "Thalach": [thalach],
-        "Exang": [exang],
-        "Oldpeak": [oldpeak],
-        "Slope": [slope],
-        "CA": [ca],
-        "Thal": [thal],
-        **results
-    })
-
-    def convert_df(df):
-        return df.to_csv(index=False).encode("utf-8")
-
-    st.download_button("📄 Download Report", convert_df(report_df), file_name=f"{name}_heart_report.csv")
-
-# Upload Report and Predict
-st.subheader("📤 Upload Existing Report (CSV or PDF)")
-uploaded_file = st.file_uploader("Upload report", type=["csv", "pdf"])
-
-if uploaded_file:
-    def extract_pdf_text(pdf_file):
-        doc = fitz.open(stream=pdf_file.read(), filetype="pdf")
-        text = " ".join([page.get_text() for page in doc])
-        return text
-
-    try:
-        if uploaded_file.name.endswith(".csv"):
-            user_data = pd.read_csv(uploaded_file).iloc[0].to_dict()
-        else:
-            text = extract_pdf_text(uploaded_file)
-            prompt = f"""
-            Extract structured data from this patient report for heart disease prediction.
-            Required fields: age, sex, cp, trestbps, chol, fbs, restecg, thalach, exang, oldpeak, slope, ca, thal.
-            Text: {text}
-            Return JSON.
-            """
-            completion = client.chat.completions.create(
-                model="llama3-8b-8192",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            user_data = eval(completion.choices[0].message.content)
-
-        missing_fields = [key for key in ["age", "sex", "cp", "trestbps", "chol", "fbs", "restecg",
-                                          "thalach", "exang", "oldpeak", "slope", "ca", "thal"]
-                          if key not in user_data]
-
-        for field in missing_fields:
-            user_data[field] = st.number_input(f"Missing value for {field}:", key=field)
-
-        input_data = [[user_data['age'], user_data['sex'], user_data['cp'], user_data['trestbps'],
-                       user_data['chol'], user_data['fbs'], user_data['restecg'], user_data['thalach'],
-                       user_data['exang'], user_data['oldpeak'], user_data['slope'],
-                       user_data['ca'], user_data['thal']]]
-
-        results = {}
-        for model_name, model in models.items():
-            prediction = model.predict(input_data)[0]
-            results[model_name] = prediction
-
-        st.success("✅ Predictions based on uploaded report:")
-        for model, result in results.items():
-            st.write(f"**{model}**: {'Healthy' if result == 0 else 'At Risk'}")
-
-    except Exception as e:
-        st.error(f"Error processing report: {e}")
+    # Report Download
+    generate_report(input_data, results)
