@@ -1,77 +1,86 @@
 import streamlit as st
-import pandas as pd
-import numpy as np
-import joblib
 import requests
-import os
+import joblib
 from io import BytesIO
-from dotenv import load_dotenv
-
-load_dotenv()
-HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
+import numpy as np
+from PIL import Image
 
 # ---------------------------
-# 🔽 File mapping from repo
-# ---------------------------
-model_file_map = {
-    "Logistic Regression": "logistic_model.pkl",
-    "Naive Bayes": "naive.pkl",
-    "SVM": "svm.pkl",
-    "KNN": "knn.pkl",
-    "Decision Tree": "tree.pkl",
-    "Random Forest": "rf.pkl",
-    "XGBoost": "xgb.pkl",
-}
-SCALER_FILENAME = "scaler.pkl"
-REPO = "Dharmesh234/Diebates23"
-
-# ---------------------------
-# 🔽 Load model from HF
+# Load model from Hugging Face
 # ---------------------------
 @st.cache_resource
 def load_model(file_name):
+    REPO = "Dharmesh234/Diebates23"
     url = f"https://huggingface.co/{REPO}/resolve/main/{file_name}"
-    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
-    response = requests.get(url, headers=headers)
-    return joblib.load(BytesIO(response.content))
+    response = requests.get(url)
+    if response.status_code != 200:
+        st.error(f"❌ Failed to load model file: {file_name}")
+        st.stop()
+    try:
+        return joblib.load(BytesIO(response.content))
+    except Exception as e:
+        st.error(f"❌ Error loading model: {file_name}\n\n{e}")
+        st.stop()
 
 # ---------------------------
-# 🔽 Main app
+# Model mapping
+# ---------------------------
+model_file_map = {
+    "Logistic Regression": "logistic_regression_model.joblib",
+    "Naive Bayes": "naive_bayes_model.joblib",
+    "SVM": "svm_model.joblib",
+    "KNN": "knn_model.joblib",
+    "Decision Tree": "decision_tree_model.joblib",
+    "Random Forest": "random_forest_model.joblib",
+    "XGBoost": "xgboost_model.joblib"
+}
+
+# ---------------------------
+# Main App
 # ---------------------------
 def main():
-    st.title("💓 Heart Disease Prediction App")
+    st.set_page_config(page_title="Diabetes Predictor", page_icon="🩺", layout="centered")
 
-    st.sidebar.header("Choose Model")
-    selected_model = st.sidebar.selectbox("Select ML Model", list(model_file_map.keys()))
+    with st.sidebar:
+        try:
+            logo = Image.open("diabetes_logo.png")
+            st.image(logo, use_column_width=True)
+        except:
+            st.warning("Logo not found. Please upload `diabetes_logo.png` to root folder.")
+        
+        st.title("🔍 Select Model")
+        selected_model = st.selectbox("Choose ML model:", list(model_file_map.keys()))
+        st.markdown("---")
+        st.markdown("Built with ❤️ using Streamlit and Hugging Face.")
 
-    # Load selected model and scaler
+    st.title("🩺 Diabetes Prediction App")
+    st.markdown("Enter patient health metrics to predict likelihood of diabetes.")
+
     model = load_model(model_file_map[selected_model])
-    scaler = load_model(SCALER_FILENAME)
 
-    st.header("Enter Your Health Details:")
+    col1, col2 = st.columns(2)
 
-    age = st.slider("Age", 20, 90, 50)
-    sex = st.selectbox("Sex", ["Male", "Female"])
-    cp = st.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
-    trestbps = st.slider("Resting BP (trestbps)", 90, 200, 120)
-    chol = st.slider("Cholesterol (chol)", 100, 600, 200)
-    fbs = st.selectbox("Fasting Blood Sugar > 120 (fbs)", [0, 1])
-    restecg = st.selectbox("RestECG", [0, 1, 2])
-    thalach = st.slider("Max Heart Rate (thalach)", 60, 210, 150)
-    exang = st.selectbox("Exercise Induced Angina", [0, 1])
-    oldpeak = st.slider("ST depression (oldpeak)", 0.0, 6.0, 1.0)
-    slope = st.selectbox("Slope of Peak Exercise ST", [0, 1, 2])
-    ca = st.selectbox("Major Vessels Colored (ca)", [0, 1, 2, 3, 4])
-    thal = st.selectbox("Thal", [0, 1, 2, 3])
+    with col1:
+        pregnancies = st.number_input("Pregnancies", min_value=0, max_value=20, value=1)
+        glucose = st.number_input("Glucose Level", min_value=0, max_value=300, value=120)
+        blood_pressure = st.number_input("Blood Pressure", min_value=0, max_value=180, value=70)
+        skin_thickness = st.number_input("Skin Thickness", min_value=0, max_value=100, value=20)
 
-    # Prepare input
-    input_data = np.array([[age, 1 if sex == "Male" else 0, cp, trestbps, chol, fbs,
-                            restecg, thalach, exang, oldpeak, slope, ca, thal]])
-    input_scaled = scaler.transform(input_data)
+    with col2:
+        insulin = st.number_input("Insulin", min_value=0, max_value=900, value=80)
+        bmi = st.number_input("BMI", min_value=0.0, max_value=70.0, value=25.0)
+        diabetes_pedigree = st.number_input("Diabetes Pedigree Function", min_value=0.0, max_value=3.0, value=0.5)
+        age = st.number_input("Age", min_value=1, max_value=120, value=30)
 
-    if st.button("Predict"):
-        result = model.predict(input_scaled)[0]
-        st.success("✅ No Heart Disease" if result == 0 else "⚠️ High Risk of Heart Disease")
+    if st.button("🔍 Predict"):
+        input_data = np.array([[pregnancies, glucose, blood_pressure, skin_thickness,
+                                insulin, bmi, diabetes_pedigree, age]])
+        prediction = model.predict(input_data)[0]
 
-if __name__ == '__main__':
+        if prediction == 1:
+            st.error("🔴 The person is likely to have **Diabetes**.")
+        else:
+            st.success("🟢 The person is **not likely** to have Diabetes.")
+
+if __name__ == "__main__":
     main()
