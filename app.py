@@ -1,6 +1,10 @@
 # app.py
 
 import streamlit as st
+
+# ✅ MUST BE FIRST Streamlit command
+st.set_page_config(page_title="Heart Disease Predictor", layout="centered")
+
 import os
 import joblib
 import requests
