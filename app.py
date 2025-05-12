@@ -39,48 +39,55 @@ model_file_map = {
 # Main App
 # ---------------------------
 def main():
-    st.set_page_config(page_title="Diabetes Predictor", page_icon="🩺", layout="centered")
+    st.set_page_config(page_title="Heart Disease Predictor", page_icon="❤️", layout="centered")
 
     with st.sidebar:
         try:
-            logo = Image.open("diabetes_logo.png")
+            logo = Image.open("heart_logo.png")
             st.image(logo, use_column_width=True)
         except:
-            st.warning("Logo not found. Please upload `diabetes_logo.png` to root folder.")
+            st.warning("Logo not found. Please upload `heart_logo.png` to the app folder.")
         
-        st.title("🔍 Select Model")
+        st.title("🧠 Select Model")
         selected_model = st.selectbox("Choose ML model:", list(model_file_map.keys()))
         st.markdown("---")
         st.markdown("Built with ❤️ using Streamlit and Hugging Face.")
 
-    st.title("🩺 Diabetes Prediction App")
-    st.markdown("Enter patient health metrics to predict likelihood of diabetes.")
+    st.title("❤️ Heart Disease Prediction App")
+    st.markdown("Enter patient metrics to predict **heart disease risk**.")
 
     model = load_model(model_file_map[selected_model])
 
     col1, col2 = st.columns(2)
 
     with col1:
-        pregnancies = st.number_input("Pregnancies", min_value=0, max_value=20, value=1)
-        glucose = st.number_input("Glucose Level", min_value=0, max_value=300, value=120)
-        blood_pressure = st.number_input("Blood Pressure", min_value=0, max_value=180, value=70)
-        skin_thickness = st.number_input("Skin Thickness", min_value=0, max_value=100, value=20)
+        age = st.number_input("Age", min_value=1, max_value=120, value=50)
+        sex = st.selectbox("Sex", ["Male", "Female"])
+        cp = st.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
+        trestbps = st.number_input("Resting Blood Pressure (trestbps)", min_value=50, max_value=250, value=130)
+        chol = st.number_input("Serum Cholesterol (chol)", min_value=100, max_value=600, value=240)
 
     with col2:
-        insulin = st.number_input("Insulin", min_value=0, max_value=900, value=80)
-        bmi = st.number_input("BMI", min_value=0.0, max_value=70.0, value=25.0)
-        diabetes_pedigree = st.number_input("Diabetes Pedigree Function", min_value=0.0, max_value=3.0, value=0.5)
-        age = st.number_input("Age", min_value=1, max_value=120, value=30)
+        fbs = st.selectbox("Fasting Blood Sugar > 120 mg/dl", ["Yes", "No"])
+        restecg = st.selectbox("Resting ECG (restecg)", [0, 1, 2])
+        thalach = st.number_input("Max Heart Rate Achieved (thalach)", min_value=60, max_value=250, value=150)
+        exang = st.selectbox("Exercise Induced Angina", ["Yes", "No"])
+        oldpeak = st.number_input("ST depression (oldpeak)", min_value=0.0, max_value=10.0, value=1.0)
+
+    # Encoding categorical inputs
+    sex = 1 if sex == "Male" else 0
+    fbs = 1 if fbs == "Yes" else 0
+    exang = 1 if exang == "Yes" else 0
+
+    input_data = np.array([[age, sex, cp, trestbps, chol, fbs,
+                            restecg, thalach, exang, oldpeak]])
 
     if st.button("🔍 Predict"):
-        input_data = np.array([[pregnancies, glucose, blood_pressure, skin_thickness,
-                                insulin, bmi, diabetes_pedigree, age]])
         prediction = model.predict(input_data)[0]
-
         if prediction == 1:
-            st.error("🔴 The person is likely to have **Diabetes**.")
+            st.error("🔴 The person is at **risk of heart disease**.")
         else:
-            st.success("🟢 The person is **not likely** to have Diabetes.")
+            st.success("🟢 The person is **not likely** to have heart disease.")
 
 if __name__ == "__main__":
     main()
