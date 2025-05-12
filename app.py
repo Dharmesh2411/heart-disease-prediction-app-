@@ -17,9 +17,22 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # ---------------------- Load models --------------------------
 @st.cache_resource
 def load_models():
-    model_names = ["Random Forest"]
-    model_path = hf_hub_download(repo_id="jaik256/diabetes-predictor", filename="diabetes_model.joblib")
-    models = {"Random Forest": joblib.load(model_path)}
+    # Download the models from Hugging Face
+    model_names = [
+        "logistic_regression_model.pkl",
+        "naive_bayes_model.pkl",
+        "svm_model.pkl",
+        "knn_model.pkl",
+        "decision_tree_model.pkl",
+        "random_forest_model.pkl",
+        "xgboost_model.pkl"
+    ]
+    
+    models = {}
+    for model_name in model_names:
+        model_path = hf_hub_download(repo_id="jaik256/heartDiseasePredictor", filename=model_name)
+        models[model_name.split(".")[0]] = joblib.load(model_path)
+    
     return models
 
 models = load_models()
@@ -90,7 +103,7 @@ def generate_pdf_with_fitz(patient_name, input_data, prediction, probability):
         y += 18
     y += 20
     result = "Diabetic" if prediction == 1 else "Non-Diabetic"
-    page.insert_text((50, y), f"Prediction (Random Forest): {result} ({probability:.2f}%)", fontsize=12)
+    page.insert_text((50, y), f"Prediction: {result} ({probability:.2f}%)", fontsize=12)
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf_doc.save(tmp.name)
@@ -143,13 +156,16 @@ else:
         "Age": st.number_input("Age", 0, 120, 30)
     }
 
+# Model Selection
+model_choice = st.selectbox("Select Model", ["Logistic Regression", "Naive Bayes", "SVM", "KNN", "Decision Tree", "Random Forest", "XGBoost"])
+
 # ---------------------- Prediction --------------------------
 if st.button("Predict"):
     if not patient_name:
         st.warning("Please enter patient name.")
         st.stop()
 
-    model = models["Random Forest"]
+    model = models[model_choice.replace(" ", "_").lower()]
     features_df = pd.DataFrame([input_data])
     prediction = model.predict(features_df)[0]
     probability = model.predict_proba(features_df)[0][1] * 100
@@ -162,4 +178,3 @@ if st.button("Predict"):
     pdf_path = generate_pdf_with_fitz(patient_name, input_data, prediction, probability)
     with open(pdf_path, "rb") as f:
         st.download_button("📄 Download PDF Report", f, file_name="diabetes_report.pdf")
-
