@@ -38,9 +38,11 @@ def generate_pdf(patient_name, input_data, model_name, prediction):
     for col, val in input_data.to_dict(orient='records')[0].items():
         pdf.cell(200, 10, txt=f"{col}: {val}", ln=True)
     
+    # Create the PDF and save to a file in memory
     buffer = BytesIO()
     pdf.output(buffer)
     buffer.seek(0)
+    
     return buffer
 
 # -------------------------------
@@ -80,10 +82,17 @@ input_df = pd.DataFrame([{
 }])
 
 if st.button("Predict"):
+    # Load the selected model from Hugging Face
     model = load_model_from_hf(model_option)
+    
+    # Make the prediction
     result = predict_heart_disease(model, input_df)
+    
+    # Show prediction result
     st.success(f"Prediction: {'Heart Disease Detected' if result else 'No Heart Disease'}")
-
+    
+    # Generate the PDF report
     report = generate_pdf(patient_name, input_df, model_option, result)
+    
+    # Provide a button for the user to download the report
     st.download_button(label="📄 Download Patient Report", data=report, file_name=f"{patient_name}_heart_report.pdf")
-
