@@ -29,7 +29,7 @@ def load_models():
     for name, filename in model_filenames.items():
         try:
             # Replace with your Hugging Face repo or local path
-            model_path = hf_hub_download(repo_id="your_username/diabetesPredictor", filename=filename)
+            model_path = hf_hub_download(repo_id="jaik256/heart-disease-predictor", filename="heart_model.joblib")
             if os.path.getsize(model_path) == 0:
                 raise ValueError(f"Model file {filename} is empty")
             with open(model_path, "rb") as f:
