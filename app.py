@@ -1,121 +1,77 @@
 import streamlit as st
-import joblib
 import pandas as pd
-import matplotlib.pyplot as plt
+import numpy as np
+import joblib
 import requests
-from io import BytesIO
-from datetime import datetime
-import base64
-import fitz  # PyMuPDF for report extraction
-from groq import Groq  # Assuming Groq API is set
 import os
+from io import BytesIO
+from dotenv import load_dotenv
 
-# Set page
-st.set_page_config(page_title="Heart Disease Predictor", layout="wide")
-st.title("🫀 Heart Disease Predictor App")
+load_dotenv()
+HF_TOKEN = os.getenv("HUGGINGFACE_TOKEN")
 
-# Load models from Hugging Face
-@st.cache_data
-def load_models():
-    models = {}
-    model_names = [
-        "logistic_regression_model.joblib",
-        "naive_bayes_model.joblib",
-        "svm_model.joblib",
-        "knn_model.joblib",
-        "decision_tree_model.joblib",
-        "random_forest_model.joblib",
-        "xgboost_model.joblib"
-    ]
-    base_url = "https://huggingface.co/Dharmesh234/Diebates23/resolve/main/"
-
-    for name in model_names:
-        url = base_url + name
-        r = requests.get(url)
-        r.raise_for_status()
-        models[name.replace("_model.joblib", "")] = joblib.load(BytesIO(r.content))
-
-    return models
-
-models = load_models()
-
-# Input features
-st.sidebar.header("User Input")
-name = st.sidebar.text_input("Name", "John Doe")
-
-features = {
-    'age': st.sidebar.number_input("Age", 1, 120, 50),
-    'sex': st.sidebar.selectbox("Sex", [0, 1]),
-    'cp': st.sidebar.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3]),
-    'trestbps': st.sidebar.slider("Resting Blood Pressure (trestbps)", 90, 200, 120),
-    'chol': st.sidebar.slider("Cholesterol (chol)", 100, 600, 240),
-    'fbs': st.sidebar.selectbox("Fasting Blood Sugar > 120 mg/dl", [0, 1]),
-    'restecg': st.sidebar.selectbox("Rest ECG", [0, 1, 2]),
-    'thalach': st.sidebar.slider("Max Heart Rate (thalach)", 60, 220, 150),
-    'exang': st.sidebar.selectbox("Exercise Induced Angina", [0, 1]),
-    'oldpeak': st.sidebar.slider("Oldpeak", 0.0, 6.2, 1.0),
-    'slope': st.sidebar.selectbox("Slope", [0, 1, 2]),
-    'ca': st.sidebar.selectbox("Number of major vessels (0-3)", [0, 1, 2, 3]),
-    'thal': st.sidebar.selectbox("Thalassemia", [0, 1, 2, 3])
+# ---------------------------
+# 🔽 File mapping from repo
+# ---------------------------
+model_file_map = {
+    "Logistic Regression": "logistic_model.pkl",
+    "Naive Bayes": "naive.pkl",
+    "SVM": "svm.pkl",
+    "KNN": "knn.pkl",
+    "Decision Tree": "tree.pkl",
+    "Random Forest": "rf.pkl",
+    "XGBoost": "xgb.pkl",
 }
+SCALER_FILENAME = "scaler.pkl"
+REPO = "Dharmesh234/Diebates23"
 
-input_df = pd.DataFrame([features])
+# ---------------------------
+# 🔽 Load model from HF
+# ---------------------------
+@st.cache_resource
+def load_model(file_name):
+    url = f"https://huggingface.co/{REPO}/resolve/main/{file_name}"
+    headers = {"Authorization": f"Bearer {HF_TOKEN}"}
+    response = requests.get(url, headers=headers)
+    return joblib.load(BytesIO(response.content))
 
-# Prediction
-if st.button("Predict Heart Disease"):
-    st.subheader(f"Prediction Results for {name}")
-    results = {}
-    for model_name, model in models.items():
-        try:
-            results[model_name] = model.predict_proba(input_df)[0][1] * 100  # Probability of disease
-        except:
-            results[model_name] = model.predict(input_df)[0] * 100  # Fallback
+# ---------------------------
+# 🔽 Main app
+# ---------------------------
+def main():
+    st.title("💓 Heart Disease Prediction App")
 
-    # Show results table
-    result_df = pd.DataFrame(list(results.items()), columns=["Model", "Disease Probability (%)"])
-    st.dataframe(result_df)
+    st.sidebar.header("Choose Model")
+    selected_model = st.sidebar.selectbox("Select ML Model", list(model_file_map.keys()))
 
-    # Plot results
-    st.subheader("Model-wise Prediction Chart")
-    fig, ax = plt.subplots()
-    ax.barh(result_df['Model'], result_df['Disease Probability (%)'], color='coral')
-    plt.xlabel("Probability (%)")
-    st.pyplot(fig)
+    # Load selected model and scaler
+    model = load_model(model_file_map[selected_model])
+    scaler = load_model(SCALER_FILENAME)
 
-    # Downloadable report
-    report = f"Report for {name}\nDate: {datetime.now()}\n\nUser Input:\n{input_df.to_string(index=False)}\n\nModel Results:\n{result_df.to_string(index=False)}"
-    b64 = base64.b64encode(report.encode()).decode()
-    href = f'<a href="data:file/txt;base64,{b64}" download="{name}_heart_disease_report.txt">📄 Download Report</a>'
-    st.markdown(href, unsafe_allow_html=True)
+    st.header("Enter Your Health Details:")
 
-# Upload Report and Extract
-st.subheader("📤 Upload Existing Report")
-uploaded_file = st.file_uploader("Upload Previous Report (PDF)", type=["pdf"])
-if uploaded_file:
-    doc = fitz.open(stream=uploaded_file.read(), filetype="pdf")
-    text = "".join([page.get_text() for page in doc])
+    age = st.slider("Age", 20, 90, 50)
+    sex = st.selectbox("Sex", ["Male", "Female"])
+    cp = st.selectbox("Chest Pain Type (cp)", [0, 1, 2, 3])
+    trestbps = st.slider("Resting BP (trestbps)", 90, 200, 120)
+    chol = st.slider("Cholesterol (chol)", 100, 600, 200)
+    fbs = st.selectbox("Fasting Blood Sugar > 120 (fbs)", [0, 1])
+    restecg = st.selectbox("RestECG", [0, 1, 2])
+    thalach = st.slider("Max Heart Rate (thalach)", 60, 210, 150)
+    exang = st.selectbox("Exercise Induced Angina", [0, 1])
+    oldpeak = st.slider("ST depression (oldpeak)", 0.0, 6.0, 1.0)
+    slope = st.selectbox("Slope of Peak Exercise ST", [0, 1, 2])
+    ca = st.selectbox("Major Vessels Colored (ca)", [0, 1, 2, 3, 4])
+    thal = st.selectbox("Thal", [0, 1, 2, 3])
 
-    # Send to Groq for data extraction
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if not groq_api_key:
-        st.error("GROQ_API_KEY not set in environment variables.")
-    else:
-        client = Groq(api_key=groq_api_key)
-        prompt = f"""
-        Extract the following from this report text:
-        - Name
-        - All 13 features required for heart disease prediction: age, sex, cp, trestbps, chol, fbs, restecg,
-          thalach, exang, oldpeak, slope, ca, thal.
-        If any field is missing, say "Missing".
+    # Prepare input
+    input_data = np.array([[age, 1 if sex == "Male" else 0, cp, trestbps, chol, fbs,
+                            restecg, thalach, exang, oldpeak, slope, ca, thal]])
+    input_scaled = scaler.transform(input_data)
 
-        Report Text:
-        {text}
-        """
-        response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        answer = response.choices[0].message.content
-        st.markdown("### Extracted Data from Report")
-        st.text(answer)
-        # Optionally, parse and allow user to edit missing fields here
+    if st.button("Predict"):
+        result = model.predict(input_scaled)[0]
+        st.success("✅ No Heart Disease" if result == 0 else "⚠️ High Risk of Heart Disease")
+
+if __name__ == '__main__':
+    main()
